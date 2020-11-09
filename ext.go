@@ -19,25 +19,24 @@ func (x *XTrie) Match (key string, forceBack bool) (int,int,error) {
 			return index, level, errors.New("code error")
 		}
 		ind := begin + int(kv)
-		abs := x.Check[ind]
-		if abs < 0 {
-			abs = -abs
+		if ind >= x.Size { // 超过最大
+			return index, level, errors.New("code not set")
 		}
-		if abs != index { // 说明上一个字符和当前字符不是上下级关系
+		if x.Check[ind] != index || -x.Check[ind] != index { // 说明上一个字符和当前字符不是上下级关系
 			return index, level, errors.New("not found key")
 		}
 		index = ind
-		if x.Base[ind] > 0 {
+		if x.Base[ind] > 0 && x.Check[ind] < 0 {
+			begin = x.Base[ind]/10
+			level = x.Base[ind]%10
+		} else {
 			if x.Check[ind] > 0 {
 				begin = x.Base[ind]
 				level = 0
 			} else {
-				begin = x.Base[ind]/10
-				level = x.Base[ind]%10
+				begin = 0
+				level = -x.Base[ind]
 			}
-		} else {
-			begin = 0
-			level = -x.Base[ind]
 		}
 		if k == len(keys) - 1 {//如果是最后一个字符
 			if forceBack { //强制返回模式，一定返回查找到的结果，除非没有结果
@@ -72,11 +71,7 @@ func (x *XTrie) Search (key string) [][3]int {
 			if ind > len(x.Base) { //越界base数组，结束查找
 				break
 			}
-			abs := x.Check[ind]
-			if abs < 0 {
-				abs = -abs
-			}
-			if abs != index { // 说明上一个字符和当前字符不是上下级关系
+			if x.Check[ind] != index || -x.Check[ind] != index { // 说明上一个字符和当前字符不是上下级关系
 				start = -1
 				break
 			}
@@ -185,11 +180,7 @@ func (x *XTrie) Insert(key string, level int) error {
 		if ind >= x.Size {
 			return x._addMove(key, level)
 		}
-		abs := x.Check[ind]
-		if abs < 0 {
-			abs = -abs
-		}
-		if abs != index { // 说明上一个字符和当前字符不是上下级关系
+		if x.Check[ind] != index || -x.Check[ind] != index { // 说明上一个字符和当前字符不是上下级关系
 			return x._addMove(key, level)
 		}
 		if k == len(keys) - 1 {//如果是最后一个字符
@@ -217,13 +208,12 @@ func (x *XTrie) Insert(key string, level int) error {
 // 前缀查找，递归方法
 func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit int) []string {
 	result := make([]string, 0, 1)
-	if *count >= limit {
+	if *count >= limit {//已经查够了不用再查询了
 		return result
 	}
-	negative := -index
-	for i:=2; i<len(x.Base); i++{
+	for i:=2; i<x.Size; i++{
 		check := x.Check[i]
-		if check != negative && check != index {
+		if check != -index && check != index {
 			continue
 		}
 		str := string(rune(i-offset))
