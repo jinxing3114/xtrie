@@ -1,6 +1,14 @@
-// 扩展double array 方法
-// 包括多种查找匹配方法
-// 增加和删除等
+// 扩展增加词库管理和检索方法
+// 支持如下的检索模式
+// Match:完全匹配检索词，判断词是否存在以及获取词相关的数据，复杂度O(n)
+// Search:内容检索模式，将内容进行任意拆解组合进行查找词，复杂度O(2n)
+// Prefix:前缀检索模式，参数作为前缀，检索相同前缀的词，复杂度O(1)至O(root)
+// Suffix:后缀检索模式，参数作为后缀，检索相同后缀的词，复杂度O(1)至O(root)，因检索原理不同，比前缀查找要快
+// Fuzzy:模糊查找，将内容进行任意拆解组合，只要词库满足包含某一个字符，检索出相关词
+// 支持管理功能：
+// Insert:插入词，根据词和词库的匹配程度，复杂度不等，最快O(1)，最慢需要重新构建整个结构
+// Delete:删除词，复杂度O(1)
+// todo 优化插入词方法，提高检索效率
 
 package xtrie
 
@@ -14,36 +22,54 @@ type MatchResult struct {
 	level int
 }
 
+// 判断是否是上下级关系
+func (x *XTrie) _upperAndLower(preIndex, index int) error {
+	if x.Check[index] != preIndex || -x.Check[index] != preIndex { // 说明上一个字符和当前字符不是上下级关系
+		return errors.New("not superior and subordinate")
+	}
+	return nil
+}
+
+// 获取上级索引，本级偏移量，本级词登等级
+func (x *XTrie) _getIndexOffset(index int) (preIndex, offset, level int) {
+	if x.Base[index] > 0 && x.Check[index] < 0 {
+		offset = x.Base[index]/10
+		level = x.Base[index]%10
+		preIndex = -x.Check[index]
+	} else {
+		if x.Check[index] > 0 {
+			offset = x.Base[index]
+			level = 0
+			preIndex = x.Check[index]
+		} else {
+			offset = 0
+			level = -x.Base[index]
+			preIndex = -x.Check[index]
+		}
+	}
+	return preIndex, offset, level
+}
+
 // 查找搜索的词是否在词库-精确查找
 // 参数 key string 查找的词
 // 返回 最后一个字符的索引，偏移量，等级，error
 func (x *XTrie) Match (key string, forceBack bool) (int,int,error) {
-	keys, begin, index, level := []rune(key), x.Base[1], 1, 0
+	keys, offset, index, level := []rune(key), x.Base[1], 1, 0
 
 	for k,kv := range keys {
 		if kv == 0 {
 			return index, level, errors.New("code error")
 		}
-		ind := begin + int(kv)
+		ind := offset + int(kv)
 		if ind >= x.Size { // 超过最大
 			return index, level, errors.New("code not set")
 		}
-		if x.Check[ind] != index || -x.Check[ind] != index { // 说明上一个字符和当前字符不是上下级关系
-			return index, level, errors.New("not found key")
+		// 说明上一个字符和当前字符不是上下级关系
+		if err := x._upperAndLower(index, ind); err != nil{
+			return index, level, err
 		}
 		index = ind
-		if x.Base[ind] > 0 && x.Check[ind] < 0 {
-			begin = x.Base[ind]/10
-			level = x.Base[ind]%10
-		} else {
-			if x.Check[ind] > 0 {
-				begin = x.Base[ind]
-				level = 0
-			} else {
-				begin = 0
-				level = -x.Base[ind]
-			}
-		}
+		_, offset, level = x._getIndexOffset(ind)
 		if k == len(keys) - 1 {//如果是最后一个字符
 			if forceBack { //强制返回模式，一定返回查找到的结果，除非没有结果
 				return index, level, nil
@@ -62,22 +88,22 @@ func (x *XTrie) Match (key string, forceBack bool) (int,int,error) {
 
 // 内容匹配模式查找
 // 可传入一段文本，逐字查找是否在词库中存在
-func (x *XTrie) Search (key string) [][3]int {
+func (x *XTrie) Search (key string) []MatchResult {
 	Keys := []rune(key)
-	var start,index,begin,level int
-	var result [][3]int
+	var start,index,offset,level int
+	var result []MatchResult
 	for k := range Keys {
 		start = -1
 		index = 1
-		begin = x.Base[index]
+		offset = x.Base[index]
 		level = 0
 		for i:=k;i<len(Keys);i++ {
 			//词库没有该字符重置状态继续查找
-			ind := begin + int(Keys[i])
+			ind := offset + int(Keys[i])
 			if ind > len(x.Base) { //越界base数组，结束查找
 				break
 			}
-			if x.Check[ind] != index || -x.Check[ind] != index { // 说明上一个字符和当前字符不是上下级关系
+			if err := x._upperAndLower(index, ind); err != nil{
 				start = -1
 				break
 			}
@@ -90,16 +116,16 @@ func (x *XTrie) Search (key string) [][3]int {
 				} else {
 					level = -x.Base[ind]
 				}
-				result = append(result, [3]int{start, i, level})
+				result = append(result, MatchResult{string(Keys[start:i + 1]), level})
 			}
 			if x.Base[ind] < 0 { //如果是结尾状态，没有后续词可查找
 				break
 			}
 			index = ind
 			if x.Base[ind] > 0 && x.Check[ind] < 0 {
-				begin = x.Base[ind]/10
+				offset = x.Base[ind]/10
 			} else {
-				begin = x.Base[ind]
+				offset = x.Base[ind]
 			}
 		}
 	}
@@ -145,11 +171,8 @@ func (x *XTrie) _add(index int, key string,keys []rune, level int) error {
 	return nil
 }
 
-/**
-	重置树结构，保持最优结构状态
-	移动树结构并添加词
-	todo 待优化
- */
+// 重置树结构，保持最优结构状态
+// 移动树结构并添加词
 func (x *XTrie) _addMove(keys string, level int) error {
 
 	x.Keymap[keys] = level
@@ -176,13 +199,13 @@ func (x *XTrie) Insert(key string, level int) error {
 	//先查找相同前缀的节点
 	//获取相同前缀最后的base status，开始添加数据
 	//读取已经入库相同前缀的词
-	keys, index, begin := []rune(key), 1, x.Base[1]
+	keys, index, offset := []rune(key), 1, x.Base[1]
 	//先查找最长的相同前缀index
 	for k,kv := range keys {
 		if kv == 0 {
 			return errors.New("code error")
 		}
-		ind := begin + int(kv)
+		ind := offset + int(kv)
 		if ind >= x.Size {
 			return x._addMove(key, level)
 		}
@@ -202,9 +225,9 @@ func (x *XTrie) Insert(key string, level int) error {
 			}
 			index = ind
 			if x.Check[ind] > 0 {
-				begin = x.Base[ind]
+				offset = x.Base[ind]
 			} else {
-				begin = x.Base[ind]/10
+				offset = x.Base[ind]/10
 			}
 		}
 	}
@@ -212,10 +235,9 @@ func (x *XTrie) Insert(key string, level int) error {
 }
 
 // 前缀查找，递归方法
-func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit int) []MatchResult {
-	result := make([]MatchResult, 0, 1)
-	if *count >= limit {//已经查够了不用再查询了
-		return result
+func (x *XTrie) _prefix (preStr string, index int, offset int, limit int, result *[]MatchResult) {
+	if len(*result) >= limit {//已经查够了不用再查询了
+		return
 	}
 	for i:=2; i<x.Size; i++{
 		check := x.Check[i]
@@ -224,11 +246,13 @@ func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit
 		}
 		str := string(rune(i-offset))
 		if check < 0 {
-			*count++
+			if len(*result) >= limit {
+				return
+			}
 			if x.Base[i] > 0 {
-				result = append(result, MatchResult{preStr + str, x.Base[i]%10})
+				*result = append(*result, MatchResult{preStr + str, x.Base[i]%10})
 			} else {
-				result = append(result, MatchResult{preStr + str, -x.Base[i]})
+				*result = append(*result, MatchResult{preStr + str, -x.Base[i]})
 			}
 		}
 		if x.Base[i] > 0 {
@@ -236,27 +260,20 @@ func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit
 			if check < 0 {
 				nextOffset = nextOffset/10
 			}
-			nextStr := x._prefix(preStr + str, i, nextOffset, count, limit)
-			if len(nextStr) > 0 {
-				for _,v := range nextStr {
-					result = append(result, v)
-				}
-			}
+			x._prefix(preStr + str, i, nextOffset, limit, result)
 		}
 	}
-	return result
 }
 
 // 前缀查找
 // 匹配搜索词所有相同前缀的词，算法复杂度较高，词不多的时候可以使用
 func (x *XTrie) Prefix(pre string, limit int) ([]MatchResult, error) {
 	index, level, err := x.Match(pre, true)
-	result := make([]MatchResult, 0, 0)
+	result := make([]MatchResult, 0, limit)
 	if err != nil {
 		return result, err
 	}
 	nextOffset := x.Base[index]
-	count := 0
 	if x.Check[index] < 0 { //说明搜索词是结束词
 		result = append(result, MatchResult{pre,level})
 		if nextOffset > 0{
@@ -266,7 +283,7 @@ func (x *XTrie) Prefix(pre string, limit int) ([]MatchResult, error) {
 	if x.Base[index] < 0 {
 		return result, nil
 	}
-	result = append(result, x._prefix("", index, nextOffset, &count, limit)...)
+	x._prefix("", index, nextOffset, limit, &result)
 	for i:=0;i<len(result);i++ {
 		result[i].word = pre + result[i].word
 	}
@@ -275,6 +292,57 @@ func (x *XTrie) Prefix(pre string, limit int) ([]MatchResult, error) {
 	} else {
 		return result, nil
 	}
+}
+
+// 根据索引查找到的完整前缀字符串
+// 调用前缀查找到所有满足相同前缀的字符串
+func (x *XTrie) _fuzzyPrefix (index int, off int, limit int, result *[]MatchResult) {
+	if len(*result) >= limit {//已经查够了不用再查询了
+		return
+	}
+	//先查找前缀，然后通过前缀匹配查找所有满足条件的词
+	key := make([]rune, 0, 5)
+
+	offset, preIndex, nextOffset := 0, index, x.Base[index]
+
+	if nextOffset < 0 { //没有后续的词，结束查找
+		*result = append(*result, MatchResult{string(rune(index-off)), -nextOffset})
+		return
+	} else {
+		if x.Check[index] < 0 { //说明搜索词是结束词
+			nextOffset = nextOffset/10
+		}
+	}
+
+	for {
+		if preIndex == 1 { //说明已经找到了
+			break
+		}
+		preIndex, offset, _ = x._getIndexOffset(preIndex)
+		key = append(key, rune(index-offset))
+	}
+	x._prefix("", index, nextOffset, limit, result)
+}
+
+// 模糊查找
+// 命中规则，只要有字符是一样的就会返回，最少一个字符
+func (x *XTrie) Fuzzy (key string, limit int) ([]MatchResult, error) {
+	keys   := []rune(key)
+	result := make([]MatchResult, 0, 10)
+	offset := 0
+	for i:=2;i<x.Size;i++ {
+		_, offset, _ = x._getIndexOffset(i)
+		for _,v := range keys {
+			//判断是否相同字符
+			if int(v) == i-offset {
+				x._fuzzyPrefix(i, offset, limit, &result)
+				if len(result) >= limit {
+					return result, nil
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 // 后缀匹配词
@@ -334,15 +402,7 @@ func (x *XTrie) Suffix (key string, limit int) ([]MatchResult, error) {
 				if index == 1 { //找到root节点了
 					break
 				}
-				preIndex = x.Check[index]
-				if preIndex < 0 {
-					preIndex = -preIndex
-				}
-				if x.Check[preIndex] < 0 {
-					offset = x.Base[preIndex]/10
-				} else {
-					offset = x.Base[preIndex]
-				}
+				preIndex, offset, _ = x._getIndexOffset(i)
 				//判断是否相同结尾字符
 				if c == false && int(keys[z]) != index - offset {
 					index = 0
