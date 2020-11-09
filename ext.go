@@ -8,6 +8,12 @@ import (
 	"errors"
 )
 
+//查询返回值结构体
+type MatchResult struct {
+	word string
+	level int
+}
+
 // 查找搜索的词是否在词库-精确查找
 // 参数 key string 查找的词
 // 返回 最后一个字符的索引，偏移量，等级，error
@@ -206,8 +212,8 @@ func (x *XTrie) Insert(key string, level int) error {
 }
 
 // 前缀查找，递归方法
-func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit int) []string {
-	result := make([]string, 0, 1)
+func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit int) []MatchResult {
+	result := make([]MatchResult, 0, 1)
 	if *count >= limit {//已经查够了不用再查询了
 		return result
 	}
@@ -219,7 +225,11 @@ func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit
 		str := string(rune(i-offset))
 		if check < 0 {
 			*count++
-			result = append(result, preStr + str)
+			if x.Base[i] > 0 {
+				result = append(result, MatchResult{preStr + str, x.Base[i]%10})
+			} else {
+				result = append(result, MatchResult{preStr + str, -x.Base[i]})
+			}
 		}
 		if x.Base[i] > 0 {
 			nextOffset := x.Base[i]
@@ -239,16 +249,16 @@ func (x *XTrie) _prefix (preStr string, index int, offset int, count *int, limit
 
 // 前缀查找
 // 匹配搜索词所有相同前缀的词，算法复杂度较高，词不多的时候可以使用
-func (x *XTrie) Prefix(pre string, limit int) ([]string, error) {
-	index, _, err := x.Match(pre, true)
-	result := make([]string, 0, 0)
+func (x *XTrie) Prefix(pre string, limit int) ([]MatchResult, error) {
+	index, level, err := x.Match(pre, true)
+	result := make([]MatchResult, 0, 0)
 	if err != nil {
 		return result, err
 	}
 	nextOffset := x.Base[index]
 	count := 0
 	if x.Check[index] < 0 { //说明搜索词是结束词
-		result = append(result, pre)
+		result = append(result, MatchResult{pre,level})
 		if nextOffset > 0{
 			nextOffset = nextOffset/10
 		}
@@ -258,13 +268,104 @@ func (x *XTrie) Prefix(pre string, limit int) ([]string, error) {
 	}
 	result = append(result, x._prefix("", index, nextOffset, &count, limit)...)
 	for i:=0;i<len(result);i++ {
-		result[i] = pre + result[i]
+		result[i].word = pre + result[i].word
 	}
 	if len(result) > 10 {
 		return result[0:limit], nil
 	} else {
 		return result, nil
 	}
+}
+
+// 后缀匹配词
+// 返回查找到的字符串以及词等级
+// 算法复杂度，对比前缀搜索要低。根据匹配到的字符依次查找，词越长，查找消耗越大
+func (x *XTrie) Suffix (key string, limit int) ([]MatchResult, error) {
+	keys        := []rune(key)
+	lastRune    := int(keys[len(keys)-1])
+	suffixStart := make([]int, 0, 10)
+	offset      := 0
+	preIndex    := 0
+	result      := make([]MatchResult, 0, 10)
+	for i:=0;i<x.Size;i++ {
+		preIndex = -x.Check[i]
+		if preIndex < 0 {
+			continue
+		}
+		if x.Base[preIndex] < 0 {
+			offset = -x.Base[preIndex]
+		} else {
+			offset = x.Base[preIndex]/10
+		}
+		//判断是否相同结尾字符
+		if lastRune != i - offset {
+			continue
+		}
+		level := 0
+		if x.Base[i] > 0 {
+			level = x.Base[i]/10
+		} else {
+			level = -x.Base[i]
+		}
+		if preIndex == 1 {
+			result = append(result, MatchResult{string(rune(lastRune)), level})
+		} else {
+			suffixStart = append(suffixStart, preIndex, level)
+		}
+	}
+	if len(suffixStart) == 0 {
+		if len(result) > 0 {
+			return result, nil
+		} else {
+			return result, errors.New("not found")
+		}
+	}
+
+	for i:=0;i<len(suffixStart);i+=2 {
+		index := suffixStart[i]
+		z := len(keys) - 2
+		c := false
+		str := ""
+		for {
+			if z < 0 { //已找到最后要匹配的字符
+				index = 0
+				break
+			} else {
+				if index == 1 { //找到root节点了
+					break
+				}
+				preIndex = x.Check[index]
+				if preIndex < 0 {
+					preIndex = -preIndex
+				}
+				if x.Check[preIndex] < 0 {
+					offset = x.Base[preIndex]/10
+				} else {
+					offset = x.Base[preIndex]
+				}
+				//判断是否相同结尾字符
+				if c == false && int(keys[z]) != index - offset {
+					index = 0
+					break
+				}
+				str  += string(rune(index-offset))
+				index = preIndex
+				if z == 0 { //找到最后一个字符，还没有找到完整的词
+					c = true
+					continue
+				}
+				z--
+			}
+
+		}
+		if index >= 0 { //如果找到词
+			result = append(result, MatchResult{string(rune(lastRune))+str, suffixStart[i+1]})
+			if len(result) == limit {
+				break
+			}
+		}
+	}
+	return result, nil
 }
 
 // 删除词
