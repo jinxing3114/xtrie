@@ -19,8 +19,8 @@ import (
 // 查询返回值结构体
 // 使用结构体可以保证检索结果的顺序，使用map结构无法保证顺序
 type MatchResult struct {
-	word string
-	level int
+	Word string `json:"word"`
+	Level int	`json:"level"`
 }
 
 // 判断是否是上下级关系
@@ -298,7 +298,7 @@ func (x *XTrie) Prefix(pre string, limit int) ([]MatchResult, error) {
 	}
 	x._prefix("", index, nextOffset, limit, &result)
 	for i:=0;i<len(result);i++ {
-		result[i].word = pre + result[i].word
+		result[i].Word = pre + result[i].Word
 	}
 	if len(result) > 10 {
 		return result[0:limit], nil
