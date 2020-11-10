@@ -42,7 +42,7 @@ func (x *XTrie) DictRead () (bool,error) {
 		if err != nil && err != io.EOF { //遇到任何错误立即返回，并忽略 EOF 错误信息
 			break
 		}
-		if lineLen >= 4 {//字符太少跳过处理
+		if lineLen >= 3 {//字符太少跳过处理
 			if line[lineLen-1] == '\n' {
 				lineLen -= 1
 			}
